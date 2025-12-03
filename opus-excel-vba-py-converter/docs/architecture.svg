@@ -1,0 +1,161 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 650">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a1a2e;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#16213e;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="frontendGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#4facfe;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#00f2fe;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="backendGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#667eea;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#764ba2;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="extractorGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#f093fb;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#f5576c;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="llmGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#4facfe;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#00f2fe;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="claudeGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#d4a574;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#c9956c;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="openaiGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#10a37f;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0d8a6a;stop-opacity:1" />
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="2" dy="4" stdDeviation="4" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="900" height="650" fill="url(#bgGrad)"/>
+  
+  <!-- Title -->
+  <text x="450" y="40" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" font-weight="bold" fill="#ffffff">
+    Excel VBA to Python Converter - Architecture
+  </text>
+  
+  <!-- Frontend Layer -->
+  <g filter="url(#shadow)">
+    <rect x="50" y="70" width="800" height="100" rx="10" fill="url(#frontendGrad)" opacity="0.9"/>
+    <text x="450" y="100" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#1a1a2e">
+      Frontend (Web UI)
+    </text>
+    
+    <!-- Frontend Components -->
+    <rect x="70" y="115" width="150" height="40" rx="5" fill="#ffffff" opacity="0.9"/>
+    <text x="145" y="140" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#1a1a2e">📁 File Upload</text>
+    
+    <rect x="240" y="115" width="150" height="40" rx="5" fill="#ffffff" opacity="0.9"/>
+    <text x="315" y="140" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#1a1a2e">📝 VBA Code Editor</text>
+    
+    <rect x="410" y="115" width="170" height="40" rx="5" fill="#ffffff" opacity="0.9"/>
+    <text x="495" y="140" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#1a1a2e">⚡ Side-by-Side View</text>
+    
+    <rect x="600" y="115" width="150" height="40" rx="5" fill="#ffffff" opacity="0.9"/>
+    <text x="675" y="140" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#1a1a2e">⬇️ Download Python</text>
+  </g>
+  
+  <!-- Arrow from Frontend to Backend -->
+  <path d="M 450 170 L 450 195" stroke="#ffffff" stroke-width="3" fill="none" marker-end="url(#arrowhead)"/>
+  <polygon points="445,195 450,210 455,195" fill="#ffffff"/>
+  
+  <!-- Backend Layer -->
+  <g filter="url(#shadow)">
+    <rect x="150" y="210" width="600" height="120" rx="10" fill="url(#backendGrad)" opacity="0.9"/>
+    <text x="450" y="240" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#ffffff">
+      Flask Backend API (app.py)
+    </text>
+    
+    <!-- API Endpoints -->
+    <rect x="170" y="255" width="170" height="55" rx="5" fill="#ffffff" opacity="0.9"/>
+    <text x="255" y="278" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" font-weight="bold" fill="#764ba2">POST /api/upload</text>
+    <text x="255" y="298" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#666">Extract VBA from Excel</text>
+    
+    <rect x="365" y="255" width="170" height="55" rx="5" fill="#ffffff" opacity="0.9"/>
+    <text x="450" y="278" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" font-weight="bold" fill="#764ba2">POST /api/convert</text>
+    <text x="450" y="298" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#666">Convert single module</text>
+    
+    <rect x="560" y="255" width="170" height="55" rx="5" fill="#ffffff" opacity="0.9"/>
+    <text x="645" y="278" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" font-weight="bold" fill="#764ba2">POST /api/convert-all</text>
+    <text x="645" y="298" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#666">Batch convert modules</text>
+  </g>
+  
+  <!-- Arrows from Backend to Processing Layers -->
+  <path d="M 300 330 L 300 370" stroke="#ffffff" stroke-width="2" fill="none"/>
+  <polygon points="295,370 300,385 305,370" fill="#ffffff"/>
+  
+  <path d="M 600 330 L 600 370" stroke="#ffffff" stroke-width="2" fill="none"/>
+  <polygon points="595,370 600,385 605,370" fill="#ffffff"/>
+  
+  <!-- VBA Extractor Module -->
+  <g filter="url(#shadow)">
+    <rect x="100" y="385" width="280" height="130" rx="10" fill="url(#extractorGrad)" opacity="0.9"/>
+    <text x="240" y="415" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#ffffff">
+      VBA Extractor (vba_extractor.py)
+    </text>
+    
+    <rect x="120" y="430" width="110" height="35" rx="5" fill="#ffffff" opacity="0.9"/>
+    <text x="175" y="452" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#1a1a2e">oletools/olevba</text>
+    
+    <rect x="250" y="430" width="110" height="35" rx="5" fill="#ffffff" opacity="0.9"/>
+    <text x="305" y="452" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#1a1a2e">olefile parsing</text>
+    
+    <rect x="120" y="475" width="240" height="30" rx="5" fill="#ffffff" opacity="0.9"/>
+    <text x="240" y="495" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#1a1a2e">📄 .xlsm | .xls | .xlsb | .xla | .xlam</text>
+  </g>
+  
+  <!-- LLM Converter Module -->
+  <g filter="url(#shadow)">
+    <rect x="420" y="385" width="380" height="130" rx="10" fill="url(#llmGrad)" opacity="0.9"/>
+    <text x="610" y="415" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#1a1a2e">
+      LLM Converter (llm_converter.py)
+    </text>
+    
+    <rect x="440" y="435" width="160" height="70" rx="5" fill="url(#claudeGrad)" opacity="0.95"/>
+    <text x="520" y="460" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#ffffff">🤖 Claude API</text>
+    <text x="520" y="478" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#ffffff">AnthropicConverter</text>
+    <text x="520" y="493" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#ffffff">claude-sonnet-4-20250514</text>
+    
+    <rect x="620" y="435" width="160" height="70" rx="5" fill="url(#openaiGrad)" opacity="0.95"/>
+    <text x="700" y="460" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#ffffff">🤖 OpenAI API</text>
+    <text x="700" y="478" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#ffffff">OpenAIConverter</text>
+    <text x="700" y="493" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#ffffff">gpt-4-turbo</text>
+  </g>
+  
+  <!-- Output Section -->
+  <g filter="url(#shadow)">
+    <rect x="200" y="545" width="500" height="80" rx="10" fill="#2d3436" opacity="0.9"/>
+    <text x="450" y="575" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#00cec9">
+      🐍 Python Output
+    </text>
+    
+    <rect x="220" y="590" width="100" height="25" rx="3" fill="#636e72"/>
+    <text x="270" y="607" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#ffffff">pandas</text>
+    
+    <rect x="340" y="590" width="100" height="25" rx="3" fill="#636e72"/>
+    <text x="390" y="607" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#ffffff">polars</text>
+    
+    <rect x="460" y="590" width="100" height="25" rx="3" fill="#636e72"/>
+    <text x="510" y="607" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#ffffff">openpyxl</text>
+    
+    <rect x="580" y="590" width="100" height="25" rx="3" fill="#636e72"/>
+    <text x="630" y="607" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#ffffff">type hints</text>
+  </g>
+  
+  <!-- Arrows to Output -->
+  <path d="M 240 515 L 350 545" stroke="#ffffff" stroke-width="2" fill="none"/>
+  <path d="M 610 515 L 550 545" stroke="#ffffff" stroke-width="2" fill="none"/>
+  
+  <!-- Data Flow Labels -->
+  <text x="180" y="360" font-family="Arial, sans-serif" font-size="10" fill="#a0aec0" font-style="italic">Excel File</text>
+  <text x="580" y="360" font-family="Arial, sans-serif" font-size="10" fill="#a0aec0" font-style="italic">VBA Code</text>
+  <text x="290" y="540" font-family="Arial, sans-serif" font-size="10" fill="#a0aec0" font-style="italic">Modules</text>
+  <text x="545" y="540" font-family="Arial, sans-serif" font-size="10" fill="#a0aec0" font-style="italic">Converted Code</text>
+</svg>
