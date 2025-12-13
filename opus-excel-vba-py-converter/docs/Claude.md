@@ -9,6 +9,8 @@ Claude is the recommended LLM provider for this application due to its:
 - Large context window (200K tokens)
 - Excellent instruction following for structured outputs
 - Strong performance with legacy code formats like VBA
+- Excellent at converting Excel formulas to Python equivalents
+- Comprehensive analysis of workbook logic and dependencies
 
 ---
 
@@ -35,9 +37,14 @@ LLM_MODEL=claude-sonnet-4-20250514
 ```python
 from llm_converter import AnthropicConverter
 
+# Test VBA conversion
 converter = AnthropicConverter()
 result = converter.convert("Sub Test()\nMsgBox \"Hello\"\nEnd Sub")
 print(result.python_code)
+
+# Test formula conversion
+formula_result = converter.convert_formula("=VLOOKUP(A2, B:C, 2, FALSE)")
+print(formula_result.python_code)
 ```
 
 ---
@@ -53,13 +60,13 @@ print(result.python_code)
 ### Model Selection Guide
 
 ```python
-# For most conversions (default)
+# For most conversions (default) - VBA, formulas, and workbook analysis
 converter = AnthropicConverter(model="claude-sonnet-4-20250514")
 
-# For complex enterprise VBA with many dependencies
+# For complex enterprise workbooks with many dependencies and formulas
 converter = AnthropicConverter(model="claude-3-opus-20240229")
 
-# For simple macros or high-volume batch processing
+# For simple macros, basic formula conversion, or high-volume batch processing
 converter = AnthropicConverter(model="claude-3-haiku-20240307")
 ```
 
@@ -145,6 +152,40 @@ VBA/VBScript code to clean, idiomatic Python code.
 5. At the end, add a comment block listing any functionality that couldn't be directly converted"""
 ```
 
+### Formula Conversion System Prompt
+
+```python
+FORMULA_CONVERSION_PROMPT = """You are an expert at converting Excel formulas to Python code.
+Convert the following Excel formula to equivalent Python code using pandas/numpy.
+
+**Conversion Rules:**
+1. Use pandas DataFrame operations for cell references
+2. Use numpy for mathematical operations
+3. Handle array formulas appropriately
+4. Include error handling for edge cases
+5. Add comments explaining the conversion
+
+**Common Excel to Python Mappings:**
+- VLOOKUP → df.merge() or df.set_index().loc[]
+- SUMIF/SUMIFS → df.loc[condition].sum()
+- COUNTIF/COUNTIFS → df.loc[condition].count()
+- IF → np.where() or df.apply(lambda)
+- INDEX/MATCH → df.set_index().loc[]
+- CONCATENATE/& → df.apply(lambda x: str(x['col1']) + str(x['col2']))
+- LEFT/RIGHT/MID → df['col'].str.slice()
+- IFERROR → try/except or df.fillna()
+- DATE/YEAR/MONTH/DAY → pd.to_datetime() and .dt accessor
+- TEXT → df['col'].astype(str).str.format()
+
+**Output Format:**
+Provide Python code that:
+1. Assumes input DataFrame is named 'df'
+2. Includes necessary imports
+3. Shows the equivalent operation
+4. Adds comments explaining the logic
+"""
+```
+
 ### User Prompt Template
 
 ```python
@@ -225,6 +266,84 @@ def _extract_python_code(self, response: str) -> str:
 ---
 
 ## Example Conversions
+
+### Formula Conversions
+
+#### VLOOKUP Formula
+
+**Input Formula:**
+```excel
+=VLOOKUP(A2, B:D, 3, FALSE)
+```
+
+**Claude Output:**
+```python
+import pandas as pd
+
+# Assuming df is your DataFrame and lookup_value is in column 'A'
+# VLOOKUP(A2, B:D, 3, FALSE) performs an exact match lookup
+
+# Create lookup table from columns B:D
+lookup_table = df[['B', 'C', 'D']].copy()
+lookup_table = lookup_table.set_index('B')
+
+# Perform the lookup (equivalent to VLOOKUP with col_index_num=3)
+result = lookup_table.loc[df.loc[1, 'A'], 'D']  # A2 = row index 1
+
+# For entire column:
+df['Result'] = df['A'].map(lookup_table['D'])
+```
+
+#### SUMIFS Formula
+
+**Input Formula:**
+```excel
+=SUMIFS(C:C, A:A, "Product", B:B, ">100")
+```
+
+**Claude Output:**
+```python
+import pandas as pd
+
+# SUMIFS: Sum column C where column A="Product" AND column B>100
+result = df.loc[
+    (df['A'] == 'Product') & (df['B'] > 100),
+    'C'
+].sum()
+
+# Alternative using query method:
+result = df.query('A == "Product" and B > 100')['C'].sum()
+```
+
+#### Complex Nested IF Formula
+
+**Input Formula:**
+```excel
+=IF(A2>100, "High", IF(A2>50, "Medium", "Low"))
+```
+
+**Claude Output:**
+```python
+import numpy as np
+import pandas as pd
+
+# Nested IF converted to np.select for clarity
+conditions = [
+    df['A'] > 100,
+    df['A'] > 50
+]
+choices = ['High', 'Medium']
+default = 'Low'
+
+df['Category'] = np.select(conditions, choices, default=default)
+
+# Alternative using pd.cut for numeric ranges:
+df['Category'] = pd.cut(
+    df['A'],
+    bins=[-np.inf, 50, 100, np.inf],
+    labels=['Low', 'Medium', 'High']
+)
+```
 
 ### Simple Sub Conversion
 
@@ -352,6 +471,107 @@ class Person:
     def greet(self) -> str:
         """Return a greeting message."""
         return f"Hello, my name is {self._name} and I am {self._age} years old."
+```
+
+### Workbook Analysis Output
+
+**Input:** Complex Excel workbook with VBA, formulas, and data
+
+**Claude Output for Comprehensive Analysis:**
+```python
+"""
+Workbook Analysis Report
+========================
+
+**VBA Modules Found:**
+- Module1 (Standard Module): 3 functions, 2 subs
+- DataProcessor (Class Module): 5 methods
+- Sheet1 (Sheet Module): Event handlers
+
+**Formula Statistics:**
+- Total formulas: 247
+- Unique formula types: 18
+- Most used functions: SUM (45), VLOOKUP (32), IF (28)
+- Complex formulas (nested >3 levels): 12
+
+**Data Structure:**
+- 5 sheets with data
+- Total rows: 2,450
+- Total columns: 34
+- Detected tables: 3
+
+**Dependencies Identified:**
+1. VBA Module1.CalculateMetrics() depends on Sheet1 data (A1:D100)
+2. Sheet2 formulas reference Sheet1 columns (B:C)
+3. DataProcessor.ProcessData() writes to Sheet3
+
+**Recommended Conversion Strategy:**
+1. Convert Sheet1-3 data to pandas DataFrames
+2. Convert VBA functions to Python functions
+3. Replace formulas with pandas operations
+4. Create main script to orchestrate the workflow
+
+**Estimated Complexity:** High (due to interdependencies)
+**Estimated Conversion Time:** 2-3 hours
+"""
+```
+
+---
+
+## Conversion Methods
+
+### convert() - VBA to Python
+
+```python
+def convert(self, vba_code: str, module_name: str = "converted_module",
+            target_library: str = "pandas") -> ConversionResult:
+    """
+    Convert VBA code to Python.
+    
+    Args:
+        vba_code: The VBA source code
+        module_name: Name for the converted module
+        target_library: 'pandas' or 'polars' for data operations
+    
+    Returns:
+        ConversionResult with python_code, notes, and token usage
+    """
+```
+
+### convert_formula() - Excel Formula to Python
+
+```python
+def convert_formula(self, formula: str, cell_ref: str = "",
+                   context: str = "") -> ConversionResult:
+    """
+    Convert an Excel formula to Python code.
+    
+    Args:
+        formula: The Excel formula (with or without leading =)
+        cell_ref: Optional cell reference (e.g., "A5")
+        context: Optional context about surrounding data
+    
+    Returns:
+        ConversionResult with Python equivalent using pandas/numpy
+    """
+```
+
+### analyze_workbook() - Comprehensive Analysis
+
+```python
+def analyze_workbook(self, vba_modules: list, formulas: dict,
+                    data_summary: dict) -> str:
+    """
+    Analyze complete workbook and provide migration strategy.
+    
+    Args:
+        vba_modules: List of extracted VBA modules
+        formulas: Dictionary of formulas by sheet
+        data_summary: Summary of data structure
+    
+    Returns:
+        Detailed analysis report with conversion recommendations
+    """
 ```
 
 ---

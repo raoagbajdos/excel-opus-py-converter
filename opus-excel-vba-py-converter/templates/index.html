@@ -111,6 +111,79 @@ End Sub"></textarea>
                     <button class="btn btn-primary" id="convertPastedBtn">Convert to Python</button>
                 </div>
             </section>
+
+            <!-- Formula Extraction Section -->
+            <section class="formulas-section">
+                <div class="section-header">
+                    <h2>🔢 Excel Formula Converter</h2>
+                    <p class="subtitle-small">Extract and convert Excel formulas to Python</p>
+                </div>
+                <div class="formula-upload">
+                    <button class="btn btn-primary" id="extractFormulasBtn">
+                        📊 Extract Formulas from Excel
+                    </button>
+                    <input type="file" id="formulaFileInput" accept=".xlsm,.xls,.xlsb,.xla,.xlam,.xlsx" hidden>
+                </div>
+                <div class="formula-results hidden" id="formulaResults">
+                    <h3>Extracted Formulas</h3>
+                    <div class="formula-stats" id="formulaStats"></div>
+                    <div class="formula-list" id="formulaList"></div>
+                </div>
+            </section>
+
+            <!-- Data Export Section -->
+            <section class="data-export-section">
+                <div class="section-header">
+                    <h2>📤 Data Export to Python</h2>
+                    <p class="subtitle-small">Export Excel data as pandas DataFrames</p>
+                </div>
+                <div class="data-export-upload">
+                    <button class="btn btn-primary" id="exportDataBtn">
+                        📥 Export Data to Python
+                    </button>
+                    <input type="file" id="dataFileInput" accept=".xlsm,.xls,.xlsb,.xlsx" hidden>
+                </div>
+                <div class="data-results hidden" id="dataResults">
+                    <h3>Exported Data</h3>
+                    <div class="data-code-panel">
+                        <div class="panel-header">
+                            <span class="panel-title">Generated Python Code</span>
+                            <button class="btn btn-secondary" id="copyDataCodeBtn">📋 Copy Code</button>
+                        </div>
+                        <pre><code class="language-python" id="dataCode"></code></pre>
+                    </div>
+                    <div class="data-metadata" id="dataMetadata"></div>
+                </div>
+            </section>
+
+            <!-- Complete Workbook Analysis Section -->
+            <section class="analysis-section">
+                <div class="section-header">
+                    <h2>🔍 Complete Workbook Analysis</h2>
+                    <p class="subtitle-small">Analyze VBA + Formulas + Data and generate comprehensive Python script</p>
+                </div>
+                <div class="analysis-upload">
+                    <button class="btn btn-primary" id="analyzeWorkbookBtn">
+                        🚀 Analyze Complete Workbook
+                    </button>
+                    <input type="file" id="analysisFileInput" accept=".xlsm,.xls,.xlsb" hidden>
+                </div>
+                <div class="analysis-results hidden" id="analysisResults">
+                    <h3>Workbook Analysis Report</h3>
+                    <div class="analysis-summary" id="analysisSummary"></div>
+                    <div class="analysis-code-panel">
+                        <div class="panel-header">
+                            <span class="panel-title">Complete Python Script</span>
+                            <button class="btn btn-secondary" id="copyAnalysisCodeBtn">📋 Copy Code</button>
+                        </div>
+                        <pre><code class="language-python" id="analysisCode"></code></pre>
+                    </div>
+                    <div class="analysis-report">
+                        <h4>Detailed Report</h4>
+                        <pre id="analysisReport"></pre>
+                    </div>
+                </div>
+            </section>
         </main>
 
         <footer>

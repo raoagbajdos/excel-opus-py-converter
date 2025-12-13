@@ -28,7 +28,7 @@ class ConversionResult:
 class BaseLLMConverter(ABC):
     """Abstract base class for LLM converters."""
     
-    SYSTEM_PROMPT = """You are an expert VBA to Python converter. Your task is to convert VBA/VBScript code to clean, idiomatic Python code.
+    VBA_SYSTEM_PROMPT = """You are an expert VBA to Python converter. Your task is to convert VBA/VBScript code to clean, idiomatic Python code.
 
 **Conversion Rules:**
 1. Use pandas for Excel/data operations by default
@@ -71,6 +71,67 @@ class BaseLLMConverter(ABC):
 4. Include comments for non-obvious conversions
 5. At the end, add a comment block listing any functionality that couldn't be directly converted"""
 
+    FORMULA_SYSTEM_PROMPT = """You are an expert Excel formula to Python converter. Convert Excel formulas to equivalent pandas/numpy operations.
+
+**Excel Function to Python Mappings:**
+
+**Lookup/Reference:**
+- VLOOKUP(value, range, col, FALSE) -> df.merge() or df.set_index().loc[]
+- XLOOKUP(lookup, array, return) -> df.set_index().loc[] or pd.merge()
+- INDEX(array, row, col) -> df.iloc[row-1, col-1]
+- MATCH(value, array, 0) -> (df == value).idxmax()
+
+**Math/Statistics:**
+- SUM(range) -> df['col'].sum() or df.sum()
+- SUMIF(range, criteria, sum_range) -> df[df['col'] == criteria]['sum_col'].sum()
+- SUMIFS(sum_range, criteria_range1, criteria1, ...) -> df[(df['col1'] == c1) & (df['col2'] == c2)]['sum_col'].sum()
+- AVERAGE(range) -> df['col'].mean()
+- COUNT(range) -> df['col'].count()
+- COUNTIF(range, criteria) -> (df['col'] == criteria).sum()
+- MAX/MIN(range) -> df['col'].max() / df['col'].min()
+
+**Logical:**
+- IF(condition, true_val, false_val) -> np.where(condition, true_val, false_val) or df['col'].apply(lambda x: true_val if condition else false_val)
+- IFS(cond1, val1, cond2, val2, ...) -> np.select([cond1, cond2], [val1, val2])
+- AND(cond1, cond2) -> (cond1) & (cond2)
+- OR(cond1, cond2) -> (cond1) | (cond2)
+
+**Text:**
+- CONCATENATE/CONCAT(a, b, c) -> df['col1'] + df['col2'] or df['col1'].str.cat(df['col2'])
+- LEFT(text, n) -> df['col'].str[:n]
+- RIGHT(text, n) -> df['col'].str[-n:]
+- MID(text, start, len) -> df['col'].str[start-1:start-1+len]
+- LEN(text) -> df['col'].str.len()
+- UPPER/LOWER(text) -> df['col'].str.upper() / df['col'].str.lower()
+- TRIM(text) -> df['col'].str.strip()
+
+**Date/Time:**
+- TODAY() -> pd.Timestamp.today() or datetime.date.today()
+- NOW() -> pd.Timestamp.now() or datetime.datetime.now()
+- YEAR/MONTH/DAY(date) -> df['date_col'].dt.year / .dt.month / .dt.day
+- DATEDIF(start, end, unit) -> (end - start).days or use relativedelta
+
+**Array/Modern:**
+- FILTER(array, condition) -> df[condition]
+- SORT(array, col, order) -> df.sort_values(by='col', ascending=order)
+- UNIQUE(array) -> df['col'].unique() or df.drop_duplicates()
+
+**Conversion Guidelines:**
+1. Use vectorized pandas operations instead of loops
+2. Handle cell references by translating to DataFrame column names
+3. Convert range references to DataFrame slicing
+4. Use numpy for element-wise operations
+5. Handle array formulas with apply() or vectorized operations
+6. Add type hints and docstrings
+7. Include error handling for edge cases
+
+**Output Format:**
+Provide Python code that:
+1. Includes necessary imports (pandas, numpy, datetime)
+2. Shows how to apply the formula to a DataFrame
+3. Includes both the formula logic and usage example
+4. Adds comments explaining the conversion"""
+
     def __init__(self, model: Optional[str] = None):
         """Initialize the converter with optional model override."""
         self.model = model
@@ -82,9 +143,15 @@ class BaseLLMConverter(ABC):
         """Convert VBA code to Python."""
         pass
     
+    @abstractmethod
+    def convert_formula(self, formula: str, cell_address: str = "A1",
+                       sheet_name: str = "Sheet1") -> ConversionResult:
+        """Convert Excel formula to Python code."""
+        pass
+    
     def _build_user_prompt(self, vba_code: str, module_name: str, 
                            target_library: str) -> str:
-        """Build the user prompt for conversion."""
+        """Build the user prompt for VBA conversion."""
         return f"""Convert the following VBA code to Python. 
 
 **Module Name:** {module_name}
@@ -96,6 +163,21 @@ class BaseLLMConverter(ABC):
 ```
 
 Provide complete, runnable Python code with all necessary imports."""
+
+    def _build_formula_prompt(self, formula: str, cell_address: str,
+                             sheet_name: str) -> str:
+        """Build the user prompt for formula conversion."""
+        return f"""Convert the following Excel formula to Python code using pandas.
+
+**Sheet:** {sheet_name}
+**Cell:** {cell_address}
+**Formula:** {formula}
+
+Provide Python code that:
+1. Shows how to implement this formula logic
+2. Includes a function that can be applied to a DataFrame
+3. Includes usage example
+4. Handles edge cases"""
 
     def _extract_notes_from_response(self, response: str) -> list[str]:
         """Extract conversion notes from the LLM response."""
@@ -188,7 +270,52 @@ class AnthropicConverter(BaseLLMConverter):
             message = self.client.messages.create(
                 model=self.model,
                 max_tokens=4096,
-                system=self.SYSTEM_PROMPT,
+                system=self.VBA_SYSTEM_PROMPT,
+                messages=[
+                    {"role": "user", "content": user_prompt}
+                ]
+            )
+            
+            response_text = message.content[0].text
+            python_code = self._extract_python_code(response_text)
+            notes = self._extract_notes_from_response(response_text)
+            
+            tokens_used = message.usage.input_tokens + message.usage.output_tokens
+            
+            return ConversionResult(
+                success=True,
+                python_code=python_code,
+                conversion_notes=notes,
+                tokens_used=tokens_used
+            )
+            
+        except Exception as e:
+            return ConversionResult(
+                success=False,
+                python_code="",
+                error=str(e)
+            )
+    
+    def convert_formula(self, formula: str, cell_address: str = "A1",
+                       sheet_name: str = "Sheet1") -> ConversionResult:
+        """
+        Convert Excel formula to Python using Claude.
+        
+        Args:
+            formula: The Excel formula to convert
+            cell_address: Cell address where formula is located
+            sheet_name: Sheet name containing the formula
+            
+        Returns:
+            ConversionResult with the converted code
+        """
+        try:
+            user_prompt = self._build_formula_prompt(formula, cell_address, sheet_name)
+            
+            message = self.client.messages.create(
+                model=self.model,
+                max_tokens=2048,
+                system=self.FORMULA_SYSTEM_PROMPT,
                 messages=[
                     {"role": "user", "content": user_prompt}
                 ]
@@ -263,7 +390,52 @@ class OpenAIConverter(BaseLLMConverter):
                 model=self.model,
                 max_tokens=4096,
                 messages=[
-                    {"role": "system", "content": self.SYSTEM_PROMPT},
+                    {"role": "system", "content": self.VBA_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt}
+                ]
+            )
+            
+            response_text = response.choices[0].message.content
+            python_code = self._extract_python_code(response_text)
+            notes = self._extract_notes_from_response(response_text)
+            
+            tokens_used = response.usage.total_tokens if response.usage else 0
+            
+            return ConversionResult(
+                success=True,
+                python_code=python_code,
+                conversion_notes=notes,
+                tokens_used=tokens_used
+            )
+            
+        except Exception as e:
+            return ConversionResult(
+                success=False,
+                python_code="",
+                error=str(e)
+            )
+    
+    def convert_formula(self, formula: str, cell_address: str = "A1",
+                       sheet_name: str = "Sheet1") -> ConversionResult:
+        """
+        Convert Excel formula to Python using OpenAI.
+        
+        Args:
+            formula: The Excel formula to convert
+            cell_address: Cell address where formula is located
+            sheet_name: Sheet name containing the formula
+            
+        Returns:
+            ConversionResult with the converted code
+        """
+        try:
+            user_prompt = self._build_formula_prompt(formula, cell_address, sheet_name)
+            
+            response = self.client.chat.completions.create(
+                model=self.model,
+                max_tokens=2048,
+                messages=[
+                    {"role": "system", "content": self.FORMULA_SYSTEM_PROMPT},
                     {"role": "user", "content": user_prompt}
                 ]
             )
@@ -371,6 +543,50 @@ class VBAToPythonConverter:
         """
         converter = self._get_converter()
         result = converter.convert(vba_code, module_name, target_library)
+        self._last_notes = result.conversion_notes
+        return result
+    
+    def convert_formula(self, formula: str, cell_address: str = "A1",
+                       sheet_name: str = "Sheet1") -> str:
+        """
+        Convert Excel formula to Python code.
+        
+        Args:
+            formula: The Excel formula to convert
+            cell_address: Cell address where formula is located
+            sheet_name: Sheet name containing the formula
+            
+        Returns:
+            Converted Python code as string
+            
+        Raises:
+            Exception: If conversion fails
+        """
+        converter = self._get_converter()
+        result = converter.convert_formula(formula, cell_address, sheet_name)
+        
+        self._last_notes = result.conversion_notes
+        
+        if not result.success:
+            raise Exception(f"Formula conversion failed: {result.error}")
+        
+        return result.python_code
+    
+    def convert_formula_with_result(self, formula: str, cell_address: str = "A1",
+                                    sheet_name: str = "Sheet1") -> ConversionResult:
+        """
+        Convert Excel formula and return full result object.
+        
+        Args:
+            formula: The Excel formula to convert
+            cell_address: Cell address where formula is located
+            sheet_name: Sheet name containing the formula
+            
+        Returns:
+            ConversionResult object with all details
+        """
+        converter = self._get_converter()
+        result = converter.convert_formula(formula, cell_address, sheet_name)
         self._last_notes = result.conversion_notes
         return result
 

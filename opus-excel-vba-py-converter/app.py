@@ -5,7 +5,10 @@ import os
 from flask import Flask, request, jsonify, render_template, send_from_directory
 from werkzeug.utils import secure_filename
 from vba_extractor import VBAExtractor
-from vba_to_python_converter import VBAToPythonConverter
+from llm_converter import VBAToPythonConverter
+from formula_extractor import FormulaExtractor
+from data_exporter import DataExporter
+from workbook_analyzer import WorkbookAnalyzer
 
 app = Flask(__name__, static_folder='static', template_folder='templates')
 
@@ -131,6 +134,177 @@ def convert_all_modules():
             'success': True,
             'converted_modules': converted_modules
         })
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/extract-formulas', methods=['POST'])
+def extract_formulas():
+    """Extract all formulas from an Excel file."""
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file provided'}), 400
+    
+    file = request.files['file']
+    
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+    
+    if not allowed_file(file.filename):
+        return jsonify({
+            'error': f'Invalid file type. Allowed types: {", ".join(ALLOWED_EXTENSIONS)}'
+        }), 400
+    
+    try:
+        filename = secure_filename(file.filename)
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
+        
+        # Extract formulas
+        extractor = FormulaExtractor(filepath)
+        formulas = extractor.extract_all_formulas()
+        
+        # Get statistics
+        statistics = extractor.get_formula_statistics(formulas)
+        
+        # Clean up uploaded file
+        os.remove(filepath)
+        
+        # Convert FormulaInfo objects to dicts
+        formulas_dict = [
+            {
+                'sheet_name': f.sheet_name,
+                'cell_address': f.cell_address,
+                'formula': f.formula,
+                'formula_type': f.formula_type,
+                'dependencies': f.dependencies,
+                'functions': f.contains_functions
+            }
+            for f in formulas
+        ]
+        
+        return jsonify({
+            'success': True,
+            'filename': filename,
+            'formulas': formulas_dict,
+            'statistics': statistics
+        })
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/convert-formula', methods=['POST'])
+def convert_formula():
+    """Convert a single Excel formula to Python."""
+    data = request.get_json()
+    
+    if not data or 'formula' not in data:
+        return jsonify({'error': 'No formula provided'}), 400
+    
+    formula = data['formula']
+    cell_address = data.get('cell_address', 'A1')
+    sheet_name = data.get('sheet_name', 'Sheet1')
+    
+    try:
+        converter = VBAToPythonConverter()
+        python_code = converter.convert_formula(formula, cell_address, sheet_name)
+        
+        return jsonify({
+            'success': True,
+            'python_code': python_code,
+            'conversion_notes': converter.get_conversion_notes()
+        })
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/export-data', methods=['POST'])
+def export_data():
+    """Export Excel data to pandas DataFrames."""
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file provided'}), 400
+    
+    file = request.files['file']
+    
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+    
+    if not allowed_file(file.filename):
+        return jsonify({
+            'error': f'Invalid file type. Allowed types: {", ".join(ALLOWED_EXTENSIONS)}'
+        }), 400
+    
+    try:
+        filename = secure_filename(file.filename)
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
+        
+        # Export data
+        exporter = DataExporter(filepath)
+        result = exporter.export_all_sheets()
+        
+        # Clean up uploaded file
+        os.remove(filepath)
+        
+        return jsonify({
+            'success': True,
+            'filename': filename,
+            'python_code': result.python_code,
+            'metadata': result.metadata
+        })
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/analyze-workbook', methods=['POST'])
+def analyze_workbook():
+    """Perform complete workbook analysis (VBA + formulas + data)."""
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file provided'}), 400
+    
+    file = request.files['file']
+    
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+    
+    if not allowed_file(file.filename):
+        return jsonify({
+            'error': f'Invalid file type. Allowed types: {", ".join(ALLOWED_EXTENSIONS)}'
+        }), 400
+    
+    try:
+        filename = secure_filename(file.filename)
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
+        
+        # Analyze workbook
+        analyzer = WorkbookAnalyzer(filepath)
+        analysis = analyzer.analyze_complete()
+        
+        # Generate report
+        report = analyzer.generate_analysis_report(analysis)
+        
+        # Clean up uploaded file
+        os.remove(filepath)
+        
+        # Convert analysis to dict for JSON
+        response_data = {
+            'success': True,
+            'filename': analysis.filename,
+            'has_vba': analysis.has_vba,
+            'vba_modules_count': len(analysis.vba_modules) if analysis.vba_modules else 0,
+            'has_formulas': analysis.has_formulas,
+            'formulas_count': len(analysis.formulas) if analysis.formulas else 0,
+            'sheets_count': len(analysis.data_export.sheet_data) if analysis.data_export else 0,
+            'python_script': analysis.python_script,
+            'report': report,
+            'metadata': analysis.data_export.metadata if analysis.data_export else {}
+        }
+        
+        return jsonify(response_data)
     
     except Exception as e:
         return jsonify({'error': str(e)}), 500
