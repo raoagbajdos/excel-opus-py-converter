@@ -4,12 +4,25 @@ LLM-Powered VBA to Python Converter
 This module handles the conversion of VBA code to Python using
 Claude (Anthropic) or OpenAI APIs.
 """
+import logging
 import os
 import re
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Optional
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
+
+
+class ConversionError(RuntimeError):
+    """Raised when VBA-to-Python or formula conversion fails."""
+
+
+# Retry defaults (can be overridden via config)
+MAX_RETRIES = int(os.getenv('LLM_MAX_RETRIES', '3'))
+RETRY_BASE_DELAY = float(os.getenv('LLM_RETRY_BASE_DELAY', '1.0'))
 
 # Load environment variables
 load_dotenv()
@@ -136,7 +149,33 @@ Provide Python code that:
         """Initialize the converter with optional model override."""
         self.model = model
         self._conversion_notes: list[str] = []
-    
+
+    @staticmethod
+    def _retry_with_backoff(fn, max_retries: int = MAX_RETRIES,
+                            base_delay: float = RETRY_BASE_DELAY):
+        """Execute *fn()* with exponential-backoff retry on transient errors."""
+        last_exc: Exception | None = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                return fn()
+            except Exception as exc:
+                last_exc = exc
+                err_str = str(exc).lower()
+                # Retry on rate-limit (429), server errors (5xx), or overloaded
+                retryable = any(tok in err_str for tok in (
+                    '429', 'rate', 'overloaded', '529', '500', '502', '503',
+                    'timeout', 'connection',
+                ))
+                if not retryable or attempt == max_retries:
+                    raise
+                delay = base_delay * (2 ** (attempt - 1))
+                logger.warning(
+                    "LLM call failed (attempt %d/%d): %s  — retrying in %.1fs",
+                    attempt, max_retries, exc, delay,
+                )
+                time.sleep(delay)
+        raise last_exc  # unreachable, but keeps type-checker happy
+
     @abstractmethod
     def convert(self, vba_code: str, module_name: str = "converted_module",
                 target_library: str = "pandas") -> ConversionResult:
@@ -266,16 +305,17 @@ class AnthropicConverter(BaseLLMConverter):
         """
         try:
             user_prompt = self._build_user_prompt(vba_code, module_name, target_library)
-            
-            message = self.client.messages.create(
-                model=self.model,
-                max_tokens=4096,
-                system=self.VBA_SYSTEM_PROMPT,
-                messages=[
-                    {"role": "user", "content": user_prompt}
-                ]
-            )
-            
+
+            def _call():
+                return self.client.messages.create(
+                    model=self.model,
+                    max_tokens=4096,
+                    system=self.VBA_SYSTEM_PROMPT,
+                    messages=[{"role": "user", "content": user_prompt}],
+                )
+
+            message = self._retry_with_backoff(_call)
+
             response_text = message.content[0].text
             python_code = self._extract_python_code(response_text)
             notes = self._extract_notes_from_response(response_text)
@@ -290,6 +330,7 @@ class AnthropicConverter(BaseLLMConverter):
             )
             
         except Exception as e:
+            logger.exception("Anthropic VBA conversion failed")
             return ConversionResult(
                 success=False,
                 python_code="",
@@ -311,16 +352,17 @@ class AnthropicConverter(BaseLLMConverter):
         """
         try:
             user_prompt = self._build_formula_prompt(formula, cell_address, sheet_name)
-            
-            message = self.client.messages.create(
-                model=self.model,
-                max_tokens=2048,
-                system=self.FORMULA_SYSTEM_PROMPT,
-                messages=[
-                    {"role": "user", "content": user_prompt}
-                ]
-            )
-            
+
+            def _call():
+                return self.client.messages.create(
+                    model=self.model,
+                    max_tokens=2048,
+                    system=self.FORMULA_SYSTEM_PROMPT,
+                    messages=[{"role": "user", "content": user_prompt}],
+                )
+
+            message = self._retry_with_backoff(_call)
+
             response_text = message.content[0].text
             python_code = self._extract_python_code(response_text)
             notes = self._extract_notes_from_response(response_text)
@@ -335,6 +377,7 @@ class AnthropicConverter(BaseLLMConverter):
             )
             
         except Exception as e:
+            logger.exception("Anthropic formula conversion failed")
             return ConversionResult(
                 success=False,
                 python_code="",
@@ -385,16 +428,19 @@ class OpenAIConverter(BaseLLMConverter):
         """
         try:
             user_prompt = self._build_user_prompt(vba_code, module_name, target_library)
-            
-            response = self.client.chat.completions.create(
-                model=self.model,
-                max_tokens=4096,
-                messages=[
-                    {"role": "system", "content": self.VBA_SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt}
-                ]
-            )
-            
+
+            def _call():
+                return self.client.chat.completions.create(
+                    model=self.model,
+                    max_tokens=4096,
+                    messages=[
+                        {"role": "system", "content": self.VBA_SYSTEM_PROMPT},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                )
+
+            response = self._retry_with_backoff(_call)
+
             response_text = response.choices[0].message.content
             python_code = self._extract_python_code(response_text)
             notes = self._extract_notes_from_response(response_text)
@@ -409,6 +455,7 @@ class OpenAIConverter(BaseLLMConverter):
             )
             
         except Exception as e:
+            logger.exception("OpenAI VBA conversion failed")
             return ConversionResult(
                 success=False,
                 python_code="",
@@ -430,16 +477,19 @@ class OpenAIConverter(BaseLLMConverter):
         """
         try:
             user_prompt = self._build_formula_prompt(formula, cell_address, sheet_name)
-            
-            response = self.client.chat.completions.create(
-                model=self.model,
-                max_tokens=2048,
-                messages=[
-                    {"role": "system", "content": self.FORMULA_SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt}
-                ]
-            )
-            
+
+            def _call():
+                return self.client.chat.completions.create(
+                    model=self.model,
+                    max_tokens=2048,
+                    messages=[
+                        {"role": "system", "content": self.FORMULA_SYSTEM_PROMPT},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                )
+
+            response = self._retry_with_backoff(_call)
+
             response_text = response.choices[0].message.content
             python_code = self._extract_python_code(response_text)
             notes = self._extract_notes_from_response(response_text)
@@ -454,11 +504,39 @@ class OpenAIConverter(BaseLLMConverter):
             )
             
         except Exception as e:
+            logger.exception("OpenAI formula conversion failed")
             return ConversionResult(
                 success=False,
                 python_code="",
                 error=str(e)
             )
+
+
+class _OfflineConverterAdapter(BaseLLMConverter):
+    """Adapter wrapping OfflineConverter to satisfy the BaseLLMConverter ABC."""
+
+    def __init__(self) -> None:
+        # Import here to avoid circular imports at module level
+        from offline_converter import OfflineConverter as _OC
+        self._engine = _OC()
+
+    def convert(self, vba_code: str, module_name: str = "converted_module",
+                target_library: str = "pandas") -> ConversionResult:
+        r = self._engine.convert(vba_code, module_name, target_library)
+        return ConversionResult(
+            success=r.success, python_code=r.python_code,
+            conversion_notes=r.conversion_notes,
+            error=r.error, tokens_used=0,
+        )
+
+    def convert_formula(self, formula: str, cell_address: str = "A1",
+                        sheet_name: str = "Sheet1") -> ConversionResult:
+        r = self._engine.convert_formula(formula, cell_address, sheet_name)
+        return ConversionResult(
+            success=r.success, python_code=r.python_code,
+            conversion_notes=r.conversion_notes,
+            error=r.error, tokens_used=0,
+        )
 
 
 class VBAToPythonConverter:
@@ -471,7 +549,7 @@ class VBAToPythonConverter:
         Initialize the converter.
         
         Args:
-            provider: 'anthropic', 'openai', or None for auto-detection
+            provider: 'anthropic', 'openai', 'offline', or None for auto-detection
         """
         self.provider = provider or os.getenv("LLM_PROVIDER", "anthropic")
         self._converter: Optional[BaseLLMConverter] = None
@@ -480,22 +558,22 @@ class VBAToPythonConverter:
     def _get_converter(self) -> BaseLLMConverter:
         """Get or create the appropriate converter."""
         if self._converter is None:
-            if self.provider == "anthropic":
+            if self.provider == "offline":
+                self._converter = _OfflineConverterAdapter()
+            elif self.provider == "anthropic":
                 self._converter = AnthropicConverter()
             elif self.provider == "openai":
                 self._converter = OpenAIConverter()
             else:
-                # Try Anthropic first, then OpenAI
+                # Try Anthropic first, then OpenAI, then fall back to offline
                 try:
                     self._converter = AnthropicConverter()
                 except ValueError:
                     try:
                         self._converter = OpenAIConverter()
                     except ValueError:
-                        raise ValueError(
-                            "No LLM API key found. Please set ANTHROPIC_API_KEY or "
-                            "OPENAI_API_KEY environment variable."
-                        )
+                        logger.info("No LLM API key found — falling back to offline converter.")
+                        self._converter = _OfflineConverterAdapter()
         return self._converter
     
     def convert(self, vba_code: str, module_name: str = "converted_module",
@@ -512,7 +590,7 @@ class VBAToPythonConverter:
             Converted Python code as string
             
         Raises:
-            Exception: If conversion fails
+            ConversionError: If conversion fails
         """
         converter = self._get_converter()
         result = converter.convert(vba_code, module_name, target_library)
@@ -520,7 +598,7 @@ class VBAToPythonConverter:
         self._last_notes = result.conversion_notes
         
         if not result.success:
-            raise Exception(f"Conversion failed: {result.error}")
+            raise ConversionError(f"Conversion failed: {result.error}")
         
         return result.python_code
     
@@ -560,7 +638,7 @@ class VBAToPythonConverter:
             Converted Python code as string
             
         Raises:
-            Exception: If conversion fails
+            ConversionError: If conversion fails
         """
         converter = self._get_converter()
         result = converter.convert_formula(formula, cell_address, sheet_name)
@@ -568,7 +646,7 @@ class VBAToPythonConverter:
         self._last_notes = result.conversion_notes
         
         if not result.success:
-            raise Exception(f"Formula conversion failed: {result.error}")
+            raise ConversionError(f"Formula conversion failed: {result.error}")
         
         return result.python_code
     

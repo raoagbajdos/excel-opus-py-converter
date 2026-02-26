@@ -814,6 +814,36 @@ def validate_vba_input(code: str) -> bool:
 
 ---
 
+## Frontend Integration with Claude
+
+When using Claude as the conversion engine, the frontend provides several quality-of-life features:
+
+### Conversion Time Tracking
+Each Claude API call is timed via `performance.now()`. The elapsed time appears in:
+- The status bar after conversion ("Converted · 3.2s")
+- The conversion history panel as a ⏱ badge
+- Batch conversions show total and per-module timing
+
+### Diff Highlighting
+After conversion, VBA→Python keyword mappings are highlighted inline:
+- VBA keywords (Sub/Function) highlighted alongside their Python equivalents (def/return)
+- Excel objects (Range/Cells) highlighted alongside pandas equivalents (pd.DataFrame)
+- Toggle on/off via the "🔍 Highlights On" button
+
+### Accessibility
+Status messages from Claude conversions are announced to screen readers via an `aria-live` region. Loading states use `aria-live="assertive"` for immediate announcement.
+
+### Keyboard Shortcuts
+All Claude conversion actions are accessible via keyboard:
+- `Ctrl+Enter` to convert pasted VBA, `Ctrl+Shift+Enter` to batch-convert all modules
+- `Ctrl+S` to download the converted Python file, `Ctrl+Shift+S` for ZIP
+- Press `?` anywhere to see the full shortcuts help overlay
+
+### Collapsible Sections & Resizable Panels
+Sidebar sections (Options, Paste, Formulas, Data Export, Analysis) can be collapsed to reduce clutter. The VBA/Python code panels have a draggable resize handle for customised layout. Both states are persisted in `localStorage`.
+
+---
+
 ## Resources
 
 - [Anthropic API Documentation](https://docs.anthropic.com)

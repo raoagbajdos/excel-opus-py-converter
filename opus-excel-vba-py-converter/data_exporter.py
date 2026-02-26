@@ -2,11 +2,16 @@
 Data Exporter Module
 Exports Excel data to pandas DataFrames and generates Python code
 """
+import logging
+import os
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
+
 import openpyxl
 import pandas as pd
-from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass
-import numpy as np
+from openpyxl.utils import get_column_letter
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -55,6 +60,16 @@ class DataExporter:
         Returns:
             ExportResult containing all sheet data and Python code
         """
+        ext = os.path.splitext(self.filepath)[1].lower()
+
+        # For genuine .xls (OLE/BIFF) files, use pandas with xlrd engine
+        if ext == '.xls':
+            return self._export_with_pandas_xlrd(
+                include_empty=include_empty,
+                infer_header=infer_header,
+                max_rows=max_rows,
+            )
+
         self.workbook = openpyxl.load_workbook(self.filepath, data_only=True)
         sheet_data_list = []
         
@@ -80,6 +95,43 @@ class DataExporter:
             sheet_data=sheet_data_list,
             python_code=python_code,
             metadata=metadata
+        )
+
+    def _export_with_pandas_xlrd(self, *,
+                                  include_empty: bool,
+                                  infer_header: bool,
+                                  max_rows: Optional[int]) -> ExportResult:
+        """Read a genuine .xls file via pandas (xlrd engine)."""
+        try:
+            all_sheets = pd.read_excel(
+                self.filepath, sheet_name=None, header=0 if infer_header else None,
+                nrows=max_rows, engine='xlrd',
+            )
+        except Exception as exc:
+            logger.warning("pandas/xlrd could not read %s: %s", self.filepath, exc)
+            return ExportResult(
+                sheet_data=[], python_code='# Could not read .xls file', metadata=self._generate_metadata([]),
+            )
+
+        sheet_data_list: List[SheetData] = []
+        for sheet_name, df in all_sheets.items():
+            if not include_empty and df.empty:
+                continue
+            dtypes = {col: str(df[col].dtype) for col in df.columns}
+            nrows, ncols = df.shape
+            data_range = f"A1:{get_column_letter(max(ncols, 1))}{nrows + 1}"
+            sheet_data_list.append(SheetData(
+                sheet_name=str(sheet_name),
+                dataframe=df,
+                data_range=data_range,
+                has_header=infer_header,
+                dtypes=dtypes,
+            ))
+
+        return ExportResult(
+            sheet_data=sheet_data_list,
+            python_code=self._generate_python_code(sheet_data_list),
+            metadata=self._generate_metadata(sheet_data_list),
         )
     
     def _export_sheet(self,
@@ -143,7 +195,6 @@ class DataExporter:
         dtypes = {col: str(df[col].dtype) for col in df.columns}
         
         # Format data range string
-        from openpyxl.utils import get_column_letter
         data_range = f"{get_column_letter(min_col)}{min_row}:{get_column_letter(max_col)}{max_row}"
         
         return SheetData(
@@ -164,49 +215,50 @@ class DataExporter:
         Returns:
             Tuple of (min_row, max_row, min_col, max_col) or None if empty
         """
-        # Get dimensions
         if sheet.max_row is None or sheet.max_column is None:
             return None
         
-        # Find first non-empty row
-        min_row = None
-        for row_idx in range(1, sheet.max_row + 1):
-            row_values = [cell.value for cell in sheet[row_idx]]
-            if any(val is not None for val in row_values):
-                min_row = row_idx
-                break
-        
+        min_row = self._find_first_nonempty_row(sheet)
         if min_row is None:
             return None
         
-        # Find last non-empty row
-        max_row = None
-        for row_idx in range(sheet.max_row, 0, -1):
-            row_values = [cell.value for cell in sheet[row_idx]]
-            if any(val is not None for val in row_values):
-                max_row = row_idx
-                break
-        
-        # Find first non-empty column
-        min_col = None
-        for col_idx in range(1, sheet.max_column + 1):
-            col_values = [sheet.cell(row=r, column=col_idx).value 
-                         for r in range(min_row, max_row + 1)]
-            if any(val is not None for val in col_values):
-                min_col = col_idx
-                break
-        
-        # Find last non-empty column
-        max_col = None
-        for col_idx in range(sheet.max_column, 0, -1):
-            col_values = [sheet.cell(row=r, column=col_idx).value 
-                         for r in range(min_row, max_row + 1)]
-            if any(val is not None for val in col_values):
-                max_col = col_idx
-                break
+        max_row = self._find_last_nonempty_row(sheet)
+        min_col = self._find_boundary_col(sheet, min_row, max_row, reverse=False)
+        max_col = self._find_boundary_col(sheet, min_row, max_row, reverse=True)
         
         if all(v is not None for v in [min_row, max_row, min_col, max_col]):
             return (min_row, max_row, min_col, max_col)
+        return None
+
+    @staticmethod
+    def _find_first_nonempty_row(sheet) -> Optional[int]:
+        """Return the first row index containing a non-empty cell."""
+        for row_idx in range(1, sheet.max_row + 1):
+            if any(cell.value is not None for cell in sheet[row_idx]):
+                return row_idx
+        return None
+
+    @staticmethod
+    def _find_last_nonempty_row(sheet) -> Optional[int]:
+        """Return the last row index containing a non-empty cell."""
+        for row_idx in range(sheet.max_row, 0, -1):
+            if any(cell.value is not None for cell in sheet[row_idx]):
+                return row_idx
+        return None
+
+    @staticmethod
+    def _find_boundary_col(sheet, min_row: int, max_row: int,
+                           *, reverse: bool = False) -> Optional[int]:
+        """Return the first (or last when *reverse*) non-empty column index."""
+        col_range = (
+            range(sheet.max_column, 0, -1) if reverse
+            else range(1, sheet.max_column + 1)
+        )
+        for col_idx in col_range:
+            col_values = [sheet.cell(row=r, column=col_idx).value
+                         for r in range(min_row, max_row + 1)]
+            if any(val is not None for val in col_values):
+                return col_idx
         return None
     
     def _looks_like_header(self, first_row: List[Any], data_rows: List[List[Any]]) -> bool:
@@ -301,12 +353,12 @@ class DataExporter:
             
             # Option 1: Read from Excel file
             code_lines.append(f'{var_name}_df = pd.read_excel(')
-            code_lines.append(f'    "your_file.xlsx",')
+            code_lines.append('    "your_file.xlsx",')
             code_lines.append(f'    sheet_name="{sheet_data.sheet_name}",')
             if sheet_data.has_header:
-                code_lines.append(f'    header=0')
+                code_lines.append('    header=0')
             else:
-                code_lines.append(f'    header=None')
+                code_lines.append('    header=None')
             code_lines.append(')')
             code_lines.append('')
             

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,37 +8,53 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
 </head>
 <body>
+    <a href="#main-content" class="skip-link">Skip to main content</a>
     <div class="container">
-        <header>
+        <header role="banner">
+            <div class="header-top">
+                <button class="btn btn-secondary btn-small" id="shortcutsHelpBtn" title="Keyboard shortcuts (?)" aria-label="Show keyboard shortcuts">⌨️ Shortcuts</button>
+                <button class="theme-toggle" id="themeToggle" title="Toggle light/dark mode" aria-label="Toggle light or dark theme">🌙</button>
+            </div>
             <h1>🐍 VBA to Python Converter</h1>
-            <p class="subtitle">Upload Excel files with macros and convert VBA to idiomatic Python</p>
+            <p class="subtitle">Upload Excel files to extract VBA macros, formulas, and data — convert everything to Python</p>
         </header>
 
-        <main>
+        <main id="main-content">
             <!-- Upload Section -->
-            <section class="upload-section">
-                <div class="upload-box" id="dropZone">
-                    <div class="upload-icon">📁</div>
+            <section class="upload-section" aria-label="File upload">
+                <div class="upload-box" id="dropZone" role="button" tabindex="0" aria-label="Upload area: drag and drop an Excel file or click to browse">
+                    <div class="upload-icon" aria-hidden="true">📁</div>
                     <h3>Drag & Drop Excel File</h3>
                     <p>or click to browse</p>
-                    <p class="file-types">Supported: .xlsm, .xls, .xlsb, .xla, .xlam</p>
-                    <input type="file" id="fileInput" accept=".xlsm,.xls,.xlsb,.xla,.xlam" hidden>
+                    <p class="file-types">Supported: .xlsm, .xls, .xlsb, .xlsx, .xla, .xlam</p>
+                    <input type="file" id="fileInput" accept=".xlsm,.xls,.xlsb,.xlsx,.xla,.xlam" hidden>
                 </div>
-                <div id="uploadStatus" class="status-message hidden"></div>
+                <div id="currentFileIndicator" class="current-file-indicator hidden">
+                    📎 Current file: <strong id="currentFileName"></strong>
+                    <span class="file-hint">(will be used automatically in all sections below)</span>
+                </div>
+                <div id="uploadStatus" class="status-message hidden" role="alert" aria-live="polite"></div>
             </section>
 
             <!-- Modules List -->
-            <section class="modules-section hidden" id="modulesSection">
+            <section class="modules-section hidden" id="modulesSection" aria-label="Extracted VBA modules">
                 <div class="section-header">
                     <h2>📋 Extracted VBA Modules</h2>
-                    <button class="btn btn-primary" id="convertAllBtn">Convert All to Python</button>
+                    <div class="header-actions">
+                        <button class="btn btn-primary" id="convertAllBtn" aria-label="Convert All to Python">🔄 Convert All to Python</button>
+                        <button class="btn btn-secondary hidden" id="downloadAllZipBtn" aria-label="Download All as ZIP">📦 Download All as ZIP</button>
+                    </div>
                 </div>
                 <div class="modules-list" id="modulesList"></div>
             </section>
 
-            <!-- Conversion Options -->
-            <section class="options-section hidden" id="optionsSection">
-                <h3>⚙️ Conversion Options</h3>
+            <!-- Conversion Options (always visible) -->
+            <section class="options-section collapsible" id="optionsSection" aria-label="Conversion options">
+                <div class="section-header">
+                    <h3>⚙️ Conversion Options</h3>
+                    <button class="btn btn-secondary btn-icon collapse-toggle" data-target="optionsBody" aria-label="Toggle conversion options" aria-expanded="true">▼</button>
+                </div>
+                <div class="collapsible-body" id="optionsBody">
                 <div class="options-grid">
                     <div class="option-group">
                         <label for="targetLibrary">Target Library:</label>
@@ -48,40 +64,69 @@
                         </select>
                     </div>
                     <div class="option-group">
+                        <label for="providerSelect">Conversion Engine:</label>
+                        <select id="providerSelect">
+                            <option value="offline" selected>⚡ Offline (no API key)</option>
+                            <option value="anthropic">🤖 Anthropic Claude</option>
+                            <option value="openai">🤖 OpenAI GPT</option>
+                        </select>
+                    </div>
+                    <div class="option-group">
                         <label>
                             <input type="checkbox" id="includeTypeHints" checked>
                             Include Type Hints
                         </label>
                     </div>
                 </div>
+                </div>
             </section>
 
             <!-- Code Comparison View -->
-            <section class="comparison-section hidden" id="comparisonSection">
+            <section class="comparison-section hidden" id="comparisonSection" aria-label="Code conversion comparison">
                 <div class="section-header">
                     <h2>🔄 Code Conversion</h2>
                     <div class="header-actions">
-                        <button class="btn btn-secondary" id="copyPythonBtn">📋 Copy Python</button>
-                        <button class="btn btn-primary" id="downloadPythonBtn">⬇️ Download .py</button>
+                        <button class="btn btn-secondary btn-small" id="toggleDiffBtn" aria-label="Highlights On" aria-pressed="true">🔍 Highlights On</button>
+                        <button class="btn btn-secondary" id="copyPythonBtn" aria-label="Copy Python">📋 Copy Python</button>
+                        <button class="btn btn-primary" id="downloadPythonBtn" aria-label="Download .py">⬇️ Download .py</button>
+                    </div>
+                </div>
+
+                <!-- Module Navigator Tabs (shown after batch convert) -->
+                <div class="module-tabs hidden" id="moduleTabs">
+                    <div class="module-tabs-scroll" id="moduleTabsList"></div>
+                    <div class="module-tabs-nav">
+                        <button class="tab-nav-btn" id="prevModuleBtn" title="Previous module" aria-label="Previous module">◀</button>
+                        <span class="tab-counter" id="tabCounter" aria-live="polite">1 / 1</span>
+                        <button class="tab-nav-btn" id="nextModuleBtn" title="Next module" aria-label="Next module">▶</button>
                     </div>
                 </div>
                 
-                <div class="code-panels">
-                    <div class="code-panel vba-panel">
+                <div class="code-panels" id="codePanels">
+                    <section class="code-panel vba-panel" aria-label="VBA source code">
                         <div class="panel-header">
                             <span class="panel-title">VBA Code</span>
-                            <span class="module-name" id="vbaModuleName"></span>
+                            <div class="panel-header-right">
+                                <span class="code-stats" id="vbaStats"></span>
+                                <span class="module-name" id="vbaModuleName"></span>
+                                <button class="btn btn-secondary btn-icon" id="copyVbaBtn" title="Copy VBA code" aria-label="Copy VBA code to clipboard">📋</button>
+                            </div>
                         </div>
                         <pre><code class="language-vbnet" id="vbaCode"></code></pre>
-                    </div>
+                    </section>
                     
-                    <div class="code-panel python-panel">
+                    <div class="panel-resize-handle" id="panelResizeHandle" role="separator" aria-label="Drag to resize code panels" tabindex="0"></div>
+
+                    <section class="code-panel python-panel" aria-label="Converted Python code">
                         <div class="panel-header">
                             <span class="panel-title">Python Code</span>
-                            <span class="status-badge" id="conversionStatus"></span>
+                            <div class="panel-header-right">
+                                <span class="code-stats" id="pythonStats"></span>
+                                <span class="status-badge" id="conversionStatus"></span>
+                            </div>
                         </div>
                         <pre><code class="language-python" id="pythonCode"></code></pre>
-                    </div>
+                    </section>
                 </div>
 
                 <!-- Conversion Notes -->
@@ -92,12 +137,14 @@
             </section>
 
             <!-- Paste VBA Section -->
-            <section class="paste-section">
+            <section class="paste-section collapsible" aria-label="Paste VBA code">
                 <div class="section-header">
                     <h2>✏️ Or Paste VBA Code Directly</h2>
+                    <button class="btn btn-secondary btn-icon collapse-toggle" data-target="pasteBody" aria-label="Toggle paste section" aria-expanded="true">▼</button>
                 </div>
+                <div class="collapsible-body" id="pasteBody">
                 <div class="paste-area">
-                    <textarea id="vbaInput" placeholder="Paste your VBA code here...
+                    <textarea id="vbaInput" aria-label="VBA code input" placeholder="Paste your VBA code here...
 
 Example:
 Sub CalculateTotal()
@@ -108,19 +155,30 @@ Sub CalculateTotal()
     total = Application.WorksheetFunction.Sum(ws.Range(&quot;A1:A10&quot;))
     MsgBox &quot;Total: &quot; &amp; total
 End Sub"></textarea>
-                    <button class="btn btn-primary" id="convertPastedBtn">Convert to Python</button>
+                    <div class="paste-toolbar">
+                        <div class="syntax-validation" id="syntaxValidation">
+                            <span class="validation-icon" id="validationIcon">⬜</span>
+                            <span class="validation-text" id="validationText">Paste VBA code above</span>
+                        </div>
+                        <button class="btn btn-primary" id="convertPastedBtn" aria-label="Convert to Python">Convert to Python</button>
+                    </div>
+                </div>
                 </div>
             </section>
 
             <!-- Formula Extraction Section -->
-            <section class="formulas-section">
+            <section class="formulas-section collapsible" aria-label="Excel formula extraction">
                 <div class="section-header">
                     <h2>🔢 Excel Formula Converter</h2>
-                    <p class="subtitle-small">Extract and convert Excel formulas to Python</p>
+                    <div class="header-actions">
+                        <button class="btn btn-secondary btn-icon collapse-toggle" data-target="formulasBody" aria-label="Toggle formula section" aria-expanded="true">▼</button>
+                    </div>
                 </div>
+                <div class="collapsible-body" id="formulasBody">
+                    <p class="subtitle-small">Extract and convert Excel formulas to Python</p>
                 <div class="formula-upload">
                     <button class="btn btn-primary" id="extractFormulasBtn">
-                        📊 Extract Formulas from Excel
+                        📊 Extract Formulas
                     </button>
                     <input type="file" id="formulaFileInput" accept=".xlsm,.xls,.xlsb,.xla,.xlam,.xlsx" hidden>
                 </div>
@@ -129,17 +187,22 @@ End Sub"></textarea>
                     <div class="formula-stats" id="formulaStats"></div>
                     <div class="formula-list" id="formulaList"></div>
                 </div>
+                </div>
             </section>
 
             <!-- Data Export Section -->
-            <section class="data-export-section">
+            <section class="data-export-section collapsible" aria-label="Data export to Python">
                 <div class="section-header">
                     <h2>📤 Data Export to Python</h2>
-                    <p class="subtitle-small">Export Excel data as pandas DataFrames</p>
+                    <div class="header-actions">
+                        <button class="btn btn-secondary btn-icon collapse-toggle" data-target="dataExportBody" aria-label="Toggle data export section" aria-expanded="true">▼</button>
+                    </div>
                 </div>
+                <div class="collapsible-body" id="dataExportBody">
+                    <p class="subtitle-small">Export Excel data as pandas DataFrames</p>
                 <div class="data-export-upload">
                     <button class="btn btn-primary" id="exportDataBtn">
-                        📥 Export Data to Python
+                        📥 Export Data
                     </button>
                     <input type="file" id="dataFileInput" accept=".xlsm,.xls,.xlsb,.xlsx" hidden>
                 </div>
@@ -154,19 +217,25 @@ End Sub"></textarea>
                     </div>
                     <div class="data-metadata" id="dataMetadata"></div>
                 </div>
+                </div>
             </section>
 
             <!-- Complete Workbook Analysis Section -->
-            <section class="analysis-section">
+            <section class="analysis-section collapsible" aria-label="Workbook analysis">
                 <div class="section-header">
                     <h2>🔍 Complete Workbook Analysis</h2>
-                    <p class="subtitle-small">Analyze VBA + Formulas + Data and generate comprehensive Python script</p>
+                    <div class="header-actions">
+                        <button class="btn btn-secondary btn-icon collapse-toggle" data-target="analysisBody" aria-label="Toggle analysis section" aria-expanded="true">▼</button>
+                    </div>
                 </div>
+                <div class="collapsible-body" id="analysisBody">
+                    <p class="subtitle-small">Analyze VBA + Formulas + Data and generate comprehensive Python script</p>
                 <div class="analysis-upload">
                     <button class="btn btn-primary" id="analyzeWorkbookBtn">
                         🚀 Analyze Complete Workbook
                     </button>
-                    <input type="file" id="analysisFileInput" accept=".xlsm,.xls,.xlsb" hidden>
+                    <p class="upload-hint" id="analysisHint">Upload a file above first, or click to select a new file</p>
+                    <input type="file" id="analysisFileInput" accept=".xlsm,.xls,.xlsb,.xlsx,.xla,.xlam" hidden>
                 </div>
                 <div class="analysis-results hidden" id="analysisResults">
                     <h3>Workbook Analysis Report</h3>
@@ -183,18 +252,98 @@ End Sub"></textarea>
                         <pre id="analysisReport"></pre>
                     </div>
                 </div>
+                </div>
+            </section>
+
+            <!-- Conversion History Panel -->
+            <section class="history-section" id="historySection" aria-label="Conversion history">
+                <div class="section-header">
+                    <h2>📜 Conversion History</h2>
+                    <div class="header-actions">
+                        <span class="history-count" id="historyCount">0 conversions</span>
+                        <button class="btn btn-secondary btn-small" id="exportHistoryBtn" title="Export history" aria-label="Export">📤 Export</button>
+                        <label class="btn btn-secondary btn-small" id="importHistoryLabel" title="Import history">
+                            📥 Import
+                            <input type="file" id="importHistoryInput" accept=".json,.csv" hidden>
+                        </label>
+                        <button class="btn btn-secondary btn-small" id="clearHistoryBtn" aria-label="Clear">🗑️ Clear</button>
+                        <button class="btn btn-secondary btn-small" id="toggleHistoryBtn" aria-label="Toggle history panel">▼</button>
+                    </div>
+                </div>
+                <div class="history-filters" id="historyFilters">
+                    <input type="text" class="history-search" id="historySearch" placeholder="🔍 Search modules..." aria-label="Search conversion history">
+                    <select class="history-engine-filter" id="historyEngineFilter" aria-label="Filter by conversion engine">
+                        <option value="all">All engines</option>
+                        <option value="offline">⚡ Offline</option>
+                        <option value="anthropic">🤖 Anthropic</option>
+                        <option value="openai">🤖 OpenAI</option>
+                    </select>
+                    <select class="history-status-filter" id="historyStatusFilter" aria-label="Filter by conversion result">
+                        <option value="all">All results</option>
+                        <option value="success">✅ Success</option>
+                        <option value="failed">❌ Failed</option>
+                    </select>
+                </div>
+                <div class="history-list" id="historyList">
+                    <p class="history-empty">No conversions yet. Convert some VBA code to see history here.</p>
+                </div>
             </section>
         </main>
 
-        <footer>
-            <p>Powered by Claude AI • Built with Flask & Python</p>
+        <footer role="contentinfo">
+            <p>Powered by Claude AI • Built with FastAPI & Python</p>
         </footer>
     </div>
 
+    <!-- Keyboard Shortcuts Overlay -->
+    <div class="shortcuts-overlay hidden" id="shortcutsOverlay" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+        <div class="shortcuts-panel">
+            <div class="shortcuts-header">
+                <h3>⌨️ Keyboard Shortcuts</h3>
+                <button class="btn btn-secondary btn-small" id="closeShortcutsBtn" aria-label="Close shortcuts panel">✕</button>
+            </div>
+            <div class="shortcuts-body">
+                <div class="shortcut-group">
+                    <h4>Conversion</h4>
+                    <div class="shortcut-row"><kbd>Ctrl</kbd>+<kbd>Enter</kbd><span>Convert pasted VBA code</span></div>
+                    <div class="shortcut-row"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd><span>Convert all modules</span></div>
+                </div>
+                <div class="shortcut-group">
+                    <h4>Files</h4>
+                    <div class="shortcut-row"><kbd>Ctrl</kbd>+<kbd>S</kbd><span>Download Python file</span></div>
+                    <div class="shortcut-row"><kbd>Ctrl</kbd>+<kbd>O</kbd><span>Open file browser</span></div>
+                    <div class="shortcut-row"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd><span>Download all as ZIP</span></div>
+                </div>
+                <div class="shortcut-group">
+                    <h4>Clipboard</h4>
+                    <div class="shortcut-row"><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>C</kbd><span>Copy Python code</span></div>
+                </div>
+                <div class="shortcut-group">
+                    <h4>Navigation</h4>
+                    <div class="shortcut-row"><kbd>Alt</kbd>+<kbd>←</kbd><span>Previous module tab</span></div>
+                    <div class="shortcut-row"><kbd>Alt</kbd>+<kbd>→</kbd><span>Next module tab</span></div>
+                    <div class="shortcut-row"><kbd>Ctrl</kbd>+<kbd>H</kbd><span>Toggle diff highlights</span></div>
+                </div>
+                <div class="shortcut-group">
+                    <h4>General</h4>
+                    <div class="shortcut-row"><kbd>Ctrl</kbd>+<kbd>D</kbd><span>Toggle dark/light theme</span></div>
+                    <div class="shortcut-row"><kbd>?</kbd><span>Show/hide this panel</span></div>
+                    <div class="shortcut-row"><kbd>Esc</kbd><span>Close overlays</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Loading Overlay -->
-    <div class="loading-overlay hidden" id="loadingOverlay">
-        <div class="loading-spinner"></div>
-        <p id="loadingMessage">Converting...</p>
+    <div class="loading-overlay hidden" id="loadingOverlay" role="dialog" aria-modal="true" aria-label="Processing">
+        <div class="loading-spinner" aria-hidden="true"></div>
+        <p id="loadingMessage" aria-live="assertive">Converting...</p>
+        <div class="batch-progress hidden" id="batchProgress">
+            <div class="batch-progress-bar">
+                <div class="batch-progress-fill" id="batchProgressFill"></div>
+            </div>
+            <span class="batch-progress-text" id="batchProgressText">0 / 0 modules</span>
+        </div>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>

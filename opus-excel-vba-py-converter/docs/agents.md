@@ -12,22 +12,19 @@ This document describes the AI agents and LLM integration used in the VBA to Pyt
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                   VBAToPythonConverter                          │
-│                   (Orchestrator Agent)                          │
-│  • Selects appropriate LLM provider                             │
-│  • Manages conversion workflow                                  │
-│  • Handles errors and retries                                   │
+│                FastAPI Backend (app.py)                         │
+│            Routes request based on provider                     │
 └─────────────────────────────────────────────────────────────────┘
                               │
-              ┌───────────────┴───────────────┐
-              ▼                               ▼
-┌─────────────────────────┐     ┌─────────────────────────────────┐
-│   AnthropicConverter    │     │      OpenAIConverter            │
-│   (Claude Agent)        │     │      (GPT Agent)                │
-│                         │     │                                 │
-│  Model: claude-sonnet-4-20250514   │     │  Model: gpt-4-turbo            │
-│  Max Tokens: 4096       │     │  Max Tokens: 4096               │
-└─────────────────────────┘     └─────────────────────────────────┘
+         ┌────────────────────┼────────────────────┐
+         ▼                    ▼                    ▼
+┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐
+│ AnthropicConverter │ │  OpenAIConverter  │ │ OfflineConverter  │
+│ (Claude Agent)     │ │  (GPT Agent)      │ │ (Rule-Based)     │
+│                    │ │                   │ │                  │
+│ claude-sonnet-4-20250514  │ │ gpt-4-turbo       │ │ No API key       │
+│ Max Tokens: 4096  │ │ Max Tokens: 4096  │ │ Deterministic    │
+└──────────────────┘ └──────────────────┘ └──────────────────┘
 ```
 
 ## Agent Classes
@@ -117,6 +114,43 @@ result = converter.convert(vba_code)
 
 ---
 
+### 4. OfflineConverter (Rule-Based Agent)
+
+**Location:** `offline_converter.py`
+
+A deterministic, rule-based converter that requires no API key or internet connection. Ideal for quick conversions and environments without LLM access.
+
+```python
+from offline_converter import OfflineConverter
+
+converter = OfflineConverter()
+result = converter.convert(vba_code, module_name="Module1")
+print(result["python_code"])
+```
+
+**Capabilities:**
+| Feature | Details |
+|---------|---------|
+| VBA Subs/Functions | Converted to Python `def` with type hints |
+| Control flow | `If`/`Select Case`/`For`/`While`/`Do` loops |
+| Type mapping | VBA types → Python type hints |
+| Constants | `vbCrLf`, `vbTab`, `True`, `False`, etc. |
+| Built-in functions | `MsgBox` → `print()`, `InputBox` → `input()` |
+| Formula conversion | `VLOOKUP`, `SUMIF`, `IF`, etc. → pandas/numpy |
+| `With` blocks | Flattened to explicit object references |
+| Error handling | `On Error` → `try`/`except` |
+
+**When to use Offline vs LLM:**
+| Scenario | Recommended Agent |
+|----------|-------------------|
+| Simple macros, standard patterns | OfflineConverter |
+| Complex business logic, context-dependent | AnthropicConverter / OpenAIConverter |
+| No API key available | OfflineConverter |
+| Highest fidelity needed | AnthropicConverter |
+| Batch conversion of many modules | OfflineConverter (faster, no rate limits) |
+
+---
+
 ## System Prompt
 
 All agents use a shared system prompt that defines the conversion rules:
@@ -151,29 +185,27 @@ See full prompt in `llm_converter.py` → `BaseLLMConverter.SYSTEM_PROMPT`
 1. User submits VBA code via UI or API
                     │
                     ▼
-2. Flask endpoint receives request (/api/convert)
+2. FastAPI endpoint receives request (/api/convert)
                     │
                     ▼
-3. VBAToPythonConverter.convert() called
+3. Provider routed based on request
+   ├── provider="offline"    → OfflineConverter.convert()
+   ├── provider="anthropic"  → AnthropicConverter.convert()
+   └── provider="openai"     → OpenAIConverter.convert()
                     │
                     ▼
-4. Provider-specific converter invoked
-   ├── AnthropicConverter.convert()
-   └── OpenAIConverter.convert()
+4. Conversion executed
+   ├── Offline: Rule-based pattern matching (instant)
+   └── LLM: System prompt + User prompt sent to API
                     │
                     ▼
-5. System prompt + User prompt sent to LLM API
+5. Response parsed and validated
+   ├── Extract code from markdown blocks (LLM)
+   ├── Extract conversion notes
+   └── Identify engine used
                     │
                     ▼
-6. LLM generates Python code
-                    │
-                    ▼
-7. Response parsed and validated
-   ├── Extract code from markdown blocks
-   └── Extract conversion notes
-                    │
-                    ▼
-8. ConversionResult returned to user
+6. Result returned to user with engine label
 ```
 
 ### ConversionResult Schema
@@ -322,12 +354,12 @@ class CustomConverter(AnthropicConverter):
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `ANTHROPIC_API_KEY` | Yes* | - | Anthropic API key |
-| `OPENAI_API_KEY` | Yes* | - | OpenAI API key |
-| `LLM_PROVIDER` | No | `anthropic` | Default provider |
+| `ANTHROPIC_API_KEY` | No* | - | Anthropic API key |
+| `OPENAI_API_KEY` | No* | - | OpenAI API key |
+| `LLM_PROVIDER` | No | `anthropic` | Default LLM provider |
 | `LLM_MODEL` | No | Provider default | Model override |
 
-*At least one API key is required.
+*API keys are only needed for LLM-powered conversion. The offline converter works without any keys.
 
 ---
 
@@ -398,5 +430,21 @@ logger.error(f"Conversion failed: {result.error}")
 
 - Conversion success rate
 - Average tokens per conversion
-- Response time per provider
+- Response time per provider (now tracked automatically via `performance.now()`)
 - Error distribution by type
+- Per-module timing in batch conversions
+
+---
+
+## Frontend Agent Integration
+
+The frontend (`app.js`) acts as a thin orchestration layer that:
+
+1. **Times conversions** via `performance.now()` and displays elapsed time in the status bar and history
+2. **Announces results** to screen readers via `announceToSR()` for accessibility
+3. **Highlights mappings** using `applyDiffHighlights()` to mark VBA↔Python keyword correspondences inline
+4. **Tracks history** with `addToHistory()`, persisting module name, engine, success status, and duration to `localStorage`
+5. **Manages batches** with `finalizeBatchConversion()`, building module tabs and computing per-module timing
+6. **Keyboard shortcuts** via `setupKeyboardShortcuts()` — global hotkeys for conversion, file operations, clipboard, navigation, and theme toggle; `?` opens a categorised shortcuts overlay
+7. **Collapsible sections** via `setupCollapsibleSections()` — expand/collapse sidebar panels with persisted state in `localStorage`
+8. **Resizable panels** via `setupResizablePanels()` — draggable/keyboard-driven handle between VBA and Python code panels with persisted split ratio

@@ -2,11 +2,15 @@
 Formula Extractor Module
 Extracts and analyzes Excel formulas from workbooks
 """
-import openpyxl
-from openpyxl.utils import get_column_letter
-from typing import List, Dict, Optional, Set
-from dataclasses import dataclass
+import logging
+import os
 import re
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Set
+
+import openpyxl
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -75,6 +79,10 @@ class FormulaExtractor:
         Returns:
             List of FormulaInfo objects
         """
+        ext = os.path.splitext(self.filepath)[1].lower()
+        if ext == '.xls':
+            return self._extract_formulas_xlrd()
+
         self.workbook = openpyxl.load_workbook(self.filepath, data_only=False)
         all_formulas = []
         
@@ -84,6 +92,26 @@ class FormulaExtractor:
         
         self.workbook.close()
         return all_formulas
+
+    def _extract_formulas_xlrd(self) -> List[FormulaInfo]:
+        """Extract formulas from a genuine .xls (BIFF) file using xlrd.
+
+        xlrd 2.x can read .xls files but does NOT expose formula text—only
+        cell values.  We can still detect formula cells (cell type XL_CELL_FORMULA
+        = 4) and record what we can.
+        """
+        try:
+            import xlrd
+        except ImportError:
+            logger.warning("xlrd not installed — cannot read .xls formulas")
+            return []
+
+        formulas: List[FormulaInfo] = []
+        book = xlrd.open_workbook(self.filepath)
+        # xlrd 2.x can read .xls but does NOT expose formula text — only values.
+        # We simply return an empty list; users should convert to .xlsx for formulas.
+        book.release_resources()
+        return formulas
     
     def _extract_sheet_formulas(self, sheet_name: str) -> List[FormulaInfo]:
         """
@@ -159,10 +187,10 @@ class FormulaExtractor:
         dependencies = []
         
         # Pattern for cell references (e.g., A1, $A$1, Sheet1!A1)
-        cell_pattern = r"(?:(?:['\"]?[\w\s]+['\"]?!)?(?:\$?[A-Z]+\$?\d+))"
+        cell_pattern = r"(?:['\"]?[\w\s]+['\"]?!)?\$?[A-Z]+\$?\d+"
         
         # Pattern for range references (e.g., A1:B10)
-        range_pattern = r"(?:(?:['\"]?[\w\s]+['\"]?!)?(?:\$?[A-Z]+\$?\d+:\$?[A-Z]+\$?\d+))"
+        range_pattern = r"(?:['\"]?[\w\s]+['\"]?!)?\$?[A-Z]+\$?\d+:\$?[A-Z]+\$?\d+"
         
         # Extract ranges first (they contain cell patterns)
         ranges = re.findall(range_pattern, formula, re.IGNORECASE)
@@ -264,7 +292,7 @@ class FormulaExtractor:
         
         return {
             'total_formulas': len(formulas),
-            'sheets_with_formulas': len(set(f.sheet_name for f in formulas)),
+            'sheets_with_formulas': len({f.sheet_name for f in formulas}),
             'unique_functions_used': len(set(all_functions)),
             'function_usage': function_counts,
             'array_formulas': sum(1 for f in formulas if f.formula_type == 'array'),

@@ -2,55 +2,78 @@
 
 ## Project Overview
 
-This is an **LLM-Powered VBA to Python Conversion Application** that enables users to upload Excel spreadsheets containing VBA macros and convert them to idiomatic Python code. The application uses AI models (Claude/OpenAI) to intelligently translate VBA syntax while leveraging modern Python data libraries.
+This is an **LLM-Powered VBA to Python Conversion Application** that enables users to upload Excel spreadsheets containing VBA macros and convert them to idiomatic Python code. The application supports AI models (Claude/OpenAI) as well as a **built-in offline rule-based converter** that requires no API keys. It also extracts Excel formulas, exports data as pandas DataFrames, and performs complete workbook analysis.
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                        Frontend (Web UI)                        │
-│  - File upload interface for .xlsm, .xls, .xlsb files          │
-│  - Code editor with VBA syntax highlighting                     │
+│  - File upload interface for .xlsm, .xls, .xlsb, .xlsx files   │
+│  - Code editor with VBA syntax highlighting (Prism.js)          │
 │  - Side-by-side VBA → Python comparison view                   │
-│  - Download converted Python files                              │
+│  - Dark/Light theme toggle with localStorage persistence        │
+│  - Conversion history panel (persisted, up to 50 entries)       │
+│  - Download individual .py files or batch ZIP download          │
+│  - Responsive design (1024px / 768px / 480px breakpoints)       │
+│  - Global keyboard shortcuts with help overlay (press ?)        │
+│  - Collapsible sidebar sections with localStorage persistence   │
+│  - Resizable code panels via drag/touch/keyboard handle         │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                     Flask Backend API                           │
-│  - POST /api/upload - Extract VBA from Excel files             │
-│  - POST /api/convert - Convert single VBA module               │
-│  - POST /api/convert-all - Batch convert all modules           │
+│                    FastAPI Backend (app.py)                     │
+│  - POST /api/upload - Extract VBA from Excel files              │
+│  - POST /api/convert - Convert single VBA module                │
+│  - POST /api/convert-all - Batch convert all modules            │
+│  - POST /api/convert-formula - Convert Excel formula            │
+│  - POST /api/extract-formulas - Extract all formulas            │
+│  - POST /api/export-data - Export data as DataFrames            │
+│  - POST /api/analyze-workbook - Full workbook analysis          │
+│  - POST /api/download-zip - Package modules as ZIP              │
+│  - GET  /api/health - Health check                              │
 └─────────────────────────────────────────────────────────────────┘
                               │
-              ┌───────────────┴───────────────┐
-              ▼                               ▼
-┌─────────────────────────┐     ┌─────────────────────────────────┐
-│    VBA Extractor        │     │     LLM Conversion Engine       │
-│  - oletools/olevba      │     │  - Claude API / OpenAI API      │
-│  - Manual OLE parsing   │     │  - Prompt engineering           │
-│  - Module classification│     │  - Code validation              │
-└─────────────────────────┘     └─────────────────────────────────┘
+         ┌────────────────────┼────────────────────┐
+         ▼                    ▼                    ▼
+┌──────────────────┐ ┌──────────────────┐ ┌──────────────────────┐
+│  VBA Extractor   │ │ Offline Converter │ │   LLM Converter      │
+│  - oletools      │ │ - Rule-based     │ │  - Claude API        │
+│  - Sheet-cell    │ │ - No API key     │ │  - OpenAI API        │
+│    VBA scanning  │ │ - ~881 lines     │ │  - Prompt engineering│
+│  - OLE parsing   │ │ - Type/const map │ │  - Code validation   │
+└──────────────────┘ └──────────────────┘ └──────────────────────┘
 ```
 
 ## Tech Stack
 
-- **Backend**: Python 3.10+, Flask
-- **VBA Extraction**: oletools, olefile, zipfile
+- **Backend**: Python 3.10+, FastAPI, Uvicorn
+- **Request Validation**: Pydantic models
+- **VBA Extraction**: oletools, olefile, openpyxl (sheet-cell fallback), xlrd (BIFF)
 - **LLM Integration**: Anthropic Claude API or OpenAI API
-- **Frontend**: HTML5, CSS3, JavaScript (vanilla or with Alpine.js)
-- **Code Display**: Prism.js or highlight.js for syntax highlighting
+- **Offline Conversion**: Rule-based engine in `offline_converter.py`
+- **Frontend**: HTML5, CSS3 (CSS custom properties for theming), vanilla JavaScript
+- **Code Display**: Prism.js for syntax highlighting
 - **Python Libraries for Conversion Targets**: pandas, polars, openpyxl
 
 ## Key Design Principles
 
-### 1. LLM-First Conversion Strategy
+### 1. Dual Conversion Strategy
 
-The conversion engine should **always use an LLM API** for translation rather than rule-based parsing. This approach:
-- Handles VBA syntax nuances and edge cases
-- Produces idiomatic, Pythonic code
-- Understands context and intent of the original code
-- Can suggest modern library alternatives (pandas, polars)
+The application supports **two conversion engines**:
+
+1. **Offline (Rule-Based)** — `offline_converter.py`
+   - No API key required
+   - Fast, deterministic output
+   - Handles common VBA patterns (Sub/Function, control flow, types, constants)
+   - Selected via `provider="offline"` in API requests
+
+2. **LLM-Powered** — `llm_converter.py`
+   - Uses Claude or OpenAI for highest fidelity
+   - Handles complex patterns, context-aware translation
+   - Produces idiomatic, Pythonic code with docstrings
+   - Selected via `provider="anthropic"` or `provider="openai"`
 
 ### 2. Conversion Prompt Guidelines
 
@@ -130,25 +153,30 @@ df = pd.read_excel(workbook_path, sheet_name="Sheet1")
 
 ```
 opus-excel-vba-py-converter/
-├── app.py                      # Flask application entry point
-├── vba_extractor.py            # VBA extraction from Excel files
+├── app.py                      # FastAPI application entry point
+├── config.py                   # Configuration, env vars, limits
+├── vba_extractor.py            # VBA extraction (OLE + sheet-cell scanning)
 ├── llm_converter.py            # LLM-powered conversion engine
-├── config.py                   # Configuration and API keys
+├── offline_converter.py        # Rule-based VBA→Python converter
+├── formula_extractor.py        # Excel formula extraction & analysis
+├── data_exporter.py            # Data export to pandas DataFrames
+├── workbook_analyzer.py        # Complete workbook analysis
 ├── requirements.txt            # Python dependencies
+├── pyproject.toml              # UV / project configuration
 ├── .env                        # Environment variables (API keys)
 ├── .env.example                # Example environment file
 ├── static/
 │   ├── css/
-│   │   └── styles.css          # Application styles
+│   │   └── styles.css          # CSS with dark/light theme variables
 │   └── js/
-│       └── app.js              # Frontend JavaScript
+│       └── app.js              # Frontend JS (theme, history, ZIP, etc.)
 ├── templates/
 │   └── index.html              # Main application template
 ├── uploads/                    # Temporary file uploads (gitignored)
-├── tests/
-│   ├── test_extractor.py       # VBA extraction tests
-│   ├── test_converter.py       # Conversion tests
-│   └── sample_files/           # Sample Excel files for testing
+├── docs/
+│   ├── agents.md               # AI agents documentation
+│   ├── Claude.md               # Claude integration guide
+│   └── skills.md               # Skills/capabilities reference
 └── .github/
     └── copilot-instructions.md # This file
 ```
@@ -182,8 +210,8 @@ Convert a single VBA code snippet to Python.
 {
   "vba_code": "Sub Example()...",
   "module_name": "Module1",
-  "target_library": "pandas",  // or "polars"
-  "include_type_hints": true
+  "target_library": "pandas",
+  "provider": "offline"
 }
 ```
 
@@ -192,25 +220,54 @@ Convert a single VBA code snippet to Python.
 {
   "success": true,
   "python_code": "def example():...",
-  "conversion_notes": ["Converted Range to DataFrame", "..."]
+  "conversion_notes": ["Converted Range to DataFrame"],
+  "engine": "offline"
 }
 ```
+
+Set `provider` to `"offline"`, `"anthropic"`, or `"openai"`.
 
 ### POST /api/convert-all
 Batch convert all extracted modules.
 
+### POST /api/convert-formula
+Convert a single Excel formula to Python.
+
+### POST /api/extract-formulas
+Extract all formulas from an Excel file.
+
+### POST /api/export-data
+Export Excel data to Python/pandas code.
+
+### POST /api/analyze-workbook
+Perform comprehensive workbook analysis.
+
+### POST /api/download-zip
+Package converted modules as a downloadable ZIP archive.
+
+**Request:**
+```json
+{
+  "files": [
+    { "filename": "Module1", "content": "def example(): ..." }
+  ]
+}
+```
+**Response:** Binary ZIP file (`application/zip`)
+
+### GET /api/health
+Health check endpoint.
+
 ## Environment Variables
 
 ```bash
-# LLM API Configuration
+# LLM API Configuration (optional — offline converter works without these)
 ANTHROPIC_API_KEY=sk-ant-...      # For Claude API
 OPENAI_API_KEY=sk-...              # For OpenAI API (alternative)
 LLM_PROVIDER=anthropic             # 'anthropic' or 'openai'
 LLM_MODEL=claude-sonnet-4-20250514        # or 'gpt-4-turbo'
 
 # Application Settings
-FLASK_ENV=development
-FLASK_DEBUG=1
 MAX_FILE_SIZE_MB=50
 UPLOAD_FOLDER=uploads
 ```
@@ -260,8 +317,22 @@ When helping with this project, be aware of these VBA-specific challenges:
 
 - [ ] Support for xlwings integration for live Excel interaction
 - [ ] Batch processing of multiple files
-- [ ] Conversion history and versioning
 - [ ] Custom prompt templates for specific use cases
 - [ ] Export as Jupyter notebooks
 - [ ] Integration with GitHub for converted code storage
 - [ ] Polars-first conversion option for performance
+- [ ] Unit test generation for converted Python code
+- [ ] Streamlit alternative UI (streamlit_app.py)
+- [ ] Toast notifications for non-blocking feedback
+- [ ] Synchronized scroll between VBA and Python panels
+- [ ] Auto-save VBA input with recovery
+- [x] Conversion history and versioning
+- [x] Offline rule-based converter (no API key)
+- [x] Dark/light theme toggle
+- [x] Download All as ZIP
+- [x] FastAPI migration from Flask
+- [x] VBA-in-cells extraction
+- [x] Responsive mobile design
+- [x] Keyboard shortcuts with help overlay
+- [x] Collapsible sidebar sections with persisted state
+- [x] Resizable code panels (drag, touch, keyboard)

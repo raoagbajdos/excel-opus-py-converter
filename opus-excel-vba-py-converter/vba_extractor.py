@@ -12,10 +12,12 @@ from typing import List, Dict, Optional
 class VBAExtractor:
     """Extract VBA code from Excel files."""
     
+    _CLASS_MODULE = 'Class Module'
+    
     # Module type identifiers
     MODULE_TYPES = {
         1: 'Standard Module',
-        2: 'Class Module', 
+        2: _CLASS_MODULE, 
         3: 'UserForm',
         100: 'Document Module (ThisWorkbook/Sheet)'
     }
@@ -38,13 +40,151 @@ class VBAExtractor:
         Returns:
             List of dictionaries containing module information
         """
-        if self.extension in ['.xlsm', '.xlsb', '.xlam']:
+        # Always try oletools first — it auto-detects the format (OLE or OpenXML)
+        modules: List[Dict] = []
+        try:
+            from oletools.olevba import VBA_Parser
+            vba_parser = VBA_Parser(self.filepath)
+            if vba_parser.detect_vba_macros():
+                for (filename, stream_path, vba_filename, vba_code) in vba_parser.extract_macros():
+                    if vba_code and vba_code.strip():
+                        module_type = self._detect_module_type(vba_filename, vba_code)
+                        modules.append({
+                            'name': vba_filename or 'Unknown',
+                            'type': module_type,
+                            'code': vba_code,
+                            'stream_path': stream_path
+                        })
+            vba_parser.close()
+        except ImportError:
+            pass
+        except Exception as e:
+            # oletools couldn't handle the file — fall through to manual methods
+            import logging
+            logging.getLogger(__name__).debug("oletools failed: %s", e)
+
+        # If no embedded macros found, try extracting VBA stored as text in sheets
+        if not modules:
+            sheet_modules = self._extract_vba_from_sheet_cells()
+            if sheet_modules:
+                return sheet_modules
+
+        if modules:
+            return modules
+
+        # Fallback: format-specific extraction without oletools
+        if self.extension in ['.xlsm', '.xlsb', '.xlam', '.xlsx']:
             return self._extract_from_xlsx_format()
         elif self.extension in ['.xls', '.xla']:
-            return self._extract_from_xls_format()
+            return self._manual_ole_extraction()
         else:
             raise ValueError(f"Unsupported file format: {self.extension}")
     
+    def _extract_vba_from_sheet_cells(self) -> List[Dict]:
+        """Extract VBA code stored as text in worksheet cells.
+
+        Some workbooks store VBA source code as plain text in a dedicated
+        worksheet (e.g. "VBA_Code", "Macros", "VBA", "Code") rather than
+        embedding it in a vbaProject.bin OLE stream.
+
+        The method scans for such sheets, reads all non-empty cells, and
+        splits the concatenated text into individual Sub / Function modules.
+        """
+        # Sheet names that commonly hold VBA source text
+        vba_sheet_names = {
+            'vba_code', 'vba', 'macros', 'macro_code', 'code',
+            'vbacode', 'macro', 'vba_source', 'source_code',
+        }
+
+        try:
+            import openpyxl
+
+            wb = openpyxl.load_workbook(self.filepath, read_only=True, data_only=True)
+        except Exception:
+            return []
+
+        modules: List[Dict] = []
+        try:
+            for sheet_name in wb.sheetnames:
+                if sheet_name.lower().replace(' ', '_') not in vba_sheet_names:
+                    continue
+
+                ws = wb[sheet_name]
+                lines: list[str] = []
+                for row in ws.iter_rows(values_only=True):
+                    for cell_value in row:
+                        if cell_value is not None:
+                            text = str(cell_value).strip()
+                            if text:
+                                lines.append(text)
+
+                if not lines:
+                    continue
+
+                # Join all cell text into one blob and split into modules
+                full_text = '\n'.join(lines)
+                parsed = self._split_vba_text_into_modules(full_text, sheet_name)
+                modules.extend(parsed)
+        finally:
+            wb.close()
+
+        return modules
+
+    def _split_vba_text_into_modules(
+        self, text: str, source_sheet: str
+    ) -> List[Dict]:
+        """Split a block of VBA text into individual Sub / Function modules."""
+        # Regex to find Sub / Function boundaries
+        pattern = re.compile(
+            r'(?:^|\n)'                                         # start of text or newline
+            r'((?:Public\s+|Private\s+)?'                       # optional scope
+            r'(?:Sub|Function)\s+'                              # keyword
+            r'[A-Za-z_]\w*'                                     # name
+            r'\s*\([^)]*\)'                                     # params
+            r'(?:\s+As\s+\w+)?'                                 # optional return type
+            r'.*?'                                              # body
+            r'End\s+(?:Sub|Function))',                          # closing
+            re.IGNORECASE | re.DOTALL,
+        )
+        matches = list(pattern.finditer(text))
+
+        if not matches:
+            # No recognisable Sub/Function – return the entire text as one module
+            return [{
+                'name': f'{source_sheet}_code',
+                'type': 'Standard Module',
+                'code': text,
+                'stream_path': f'Cells/{source_sheet}',
+            }]
+
+        modules: List[Dict] = []
+        for m in matches:
+            code_block = m.group(0).strip()
+            # Extract the procedure name for the module name
+            name_match = re.search(
+                r'(?:Sub|Function)\s+([A-Za-z_]\w*)', code_block, re.IGNORECASE,
+            )
+            proc_name = name_match.group(1) if name_match else f'Module_{len(modules)+1}'
+            mod_type = self._detect_module_type(proc_name, code_block)
+            modules.append({
+                'name': proc_name,
+                'type': mod_type,
+                'code': code_block,
+                'stream_path': f'Cells/{source_sheet}',
+            })
+
+        # If there's preamble text before the first match (Dim statements, comments, etc.)
+        preamble = text[:matches[0].start()].strip()
+        if preamble and len(preamble) > 20:
+            modules.insert(0, {
+                'name': f'{source_sheet}_declarations',
+                'type': 'Standard Module',
+                'code': preamble,
+                'stream_path': f'Cells/{source_sheet}',
+            })
+
+        return modules
+
     def _extract_from_xlsx_format(self) -> List[Dict]:
         """
         Extract VBA from modern Excel formats (.xlsm, .xlsb, .xlam).
@@ -158,32 +298,26 @@ class VBAExtractor:
         Returns:
             List of module dictionaries
         """
-        modules = []
-        
-        # Try to find VBA code patterns in the binary
-        # VBA code is typically stored as compressed or plain text
-        
-        # Look for "Attribute VB_Name" which indicates module start
         content_str = vba_content.decode('latin-1', errors='ignore')
+        modules = self._extract_modules_by_attribute(content_str)
+
+        if not modules:
+            modules = self._extract_modules_by_keywords(content_str)
         
-        # Pattern to find module declarations
+        return modules
+
+    def _extract_modules_by_attribute(self, content_str: str) -> List[Dict]:
+        """Extract modules using 'Attribute VB_Name' markers."""
+        modules: List[Dict] = []
         module_pattern = r'Attribute\s+VB_Name\s*=\s*"([^"]+)"'
         matches = list(re.finditer(module_pattern, content_str))
         
         for i, match in enumerate(matches):
             module_name = match.group(1)
             start_pos = match.start()
+            end_pos = matches[i + 1].start() if i + 1 < len(matches) else len(content_str)
             
-            # Find the end of this module (start of next or end of content)
-            if i + 1 < len(matches):
-                end_pos = matches[i + 1].start()
-            else:
-                end_pos = len(content_str)
-            
-            # Extract the code
             code_section = content_str[start_pos:end_pos]
-            
-            # Clean up the code
             cleaned_code = self._clean_extracted_code(code_section)
             
             if cleaned_code.strip():
@@ -193,29 +327,27 @@ class VBAExtractor:
                     'code': cleaned_code,
                     'stream_path': 'manual_extraction'
                 })
-        
-        # If no modules found with pattern, try to extract any VBA-like code
-        if not modules:
-            vba_keywords = ['Sub ', 'Function ', 'Private Sub', 'Public Sub', 
-                          'Private Function', 'Public Function', 'Dim ', 'End Sub', 'End Function']
-            
-            for keyword in vba_keywords:
-                if keyword in content_str:
-                    # Found some VBA code, extract it
-                    code_start = content_str.find(keyword)
-                    extracted = content_str[code_start:code_start + 5000]  # Extract chunk
-                    cleaned = self._clean_extracted_code(extracted)
-                    
-                    if cleaned.strip():
-                        modules.append({
-                            'name': 'ExtractedCode',
-                            'type': 'Unknown',
-                            'code': cleaned,
-                            'stream_path': 'manual_extraction'
-                        })
-                        break
-        
         return modules
+
+    def _extract_modules_by_keywords(self, content_str: str) -> List[Dict]:
+        """Fallback: extract VBA code by searching for common keywords."""
+        vba_keywords = [
+            'Sub ', 'Function ', 'Private Sub', 'Public Sub',
+            'Private Function', 'Public Function', 'Dim ', 'End Sub', 'End Function',
+        ]
+        for keyword in vba_keywords:
+            if keyword in content_str:
+                code_start = content_str.find(keyword)
+                extracted = content_str[code_start:code_start + 5000]
+                cleaned = self._clean_extracted_code(extracted)
+                if cleaned.strip():
+                    return [{
+                        'name': 'ExtractedCode',
+                        'type': 'Unknown',
+                        'code': cleaned,
+                        'stream_path': 'manual_extraction'
+                    }]
+        return []
     
     def _manual_ole_extraction(self) -> List[Dict]:
         """
@@ -253,7 +385,7 @@ class VBAExtractor:
                         content = ole.openstream(stream).read()
                         extracted = self._manual_vba_extraction(content)
                         modules.extend(extracted)
-                    except:
+                    except Exception:
                         pass
             
             ole.close()
@@ -286,11 +418,11 @@ class VBAExtractor:
         elif 'userform' in name_lower or 'frm' in name_lower:
             return 'UserForm'
         elif 'class' in name_lower or 'cls' in name_lower:
-            return 'Class Module'
+            return self._CLASS_MODULE
         
         # Check code content
         if 'Attribute VB_Creatable' in code or 'Attribute VB_Exposed' in code:
-            return 'Class Module'
+            return self._CLASS_MODULE
         elif 'Begin {' in code or 'Begin VB.Form' in code:
             return 'UserForm'
         
